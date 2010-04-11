@@ -21,10 +21,10 @@ package org.herrlado.websms.connector.smsge;
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
 import java.text.SimpleDateFormat;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import org.apache.http.HttpResponse;
+import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.client.utils.URLEncodedUtils;
 import org.apache.http.entity.StringEntity;
@@ -86,10 +86,10 @@ public class ConnectorSmsge extends Connector {
 	 */
 	@Override
 	public final ConnectorSpec initSpec(final Context context) {
-		final String name = context.getString(R.string.myphone_name);
-		final ConnectorSpec c = new ConnectorSpec(TAG, name);
+		final String name = context.getString(R.string.smsge_name);
+		final ConnectorSpec c = new ConnectorSpec(name);
 		c.setAuthor(// .
-				context.getString(R.string.myphone_author));
+				context.getString(R.string.smsge_author));
 		c.setBalance(null);
 		c.setPrefsTitle(context.getString(R.string.preferences));
 
@@ -141,6 +141,9 @@ public class ConnectorSmsge extends Connector {
 		sb.append(URLEncoder.encode(username, ENCODING));
 		sb.append("&passwd=");
 		sb.append(URLEncoder.encode(password, ENCODING));
+		sb.append("&" + URLEncoder.encode("submit.x") + "=42");
+		sb.append("&" + URLEncoder.encode("submit.y") + "=5");
+		Log.d(TAG, sb.toString());
 		return sb.toString();
 	}
 
@@ -216,14 +219,18 @@ public class ConnectorSmsge extends Connector {
 			final HttpPost request = createPOST(LOGIN_URL, getLoginPost(p
 					.getString(Preferences.USERNAME, ""), p.getString(
 					Preferences.PASSWORD, "")));
-			final HttpResponse response = ctx.getClient().execute(request);
+			HttpResponse response = ctx.getClient().execute(request);
+			response = ctx.getClient().execute(
+					new HttpGet("http://www.sms.ge/ngeo/main.php"));
 			final String cutContent = Utils.stream2str(response.getEntity()
 					.getContent());
+
+			Log.d(TAG, cutContent);
 			if (cutContent.indexOf(MATCH_LOGIN_SUCCESS) == -1) {
 				throw new WebSMSException(ctx.getContext(), R.string.error_pw);
 			}
 
-			notifyFreeCount(ctx, cutContent);
+			// notifyFreeCount(ctx, cutContent);
 
 		} catch (final Exception e) {
 			throw new WebSMSException(e.getMessage());
@@ -259,7 +266,8 @@ public class ConnectorSmsge extends Connector {
 	protected final void doUpdate(final Context context, final Intent intent)
 			throws WebSMSException {
 		final ConnectorContext ctx = ConnectorContext.create(context, intent);
-		this.login(ctx);
+		final String term = "\u221E";
+		this.getSpec(ctx.getContext()).setBalance(term);
 	}
 
 	/**
@@ -354,18 +362,18 @@ public class ConnectorSmsge extends Connector {
 	 * @param content
 	 *            conten to investigate.
 	 */
-	private void notifyFreeCount(final ConnectorContext ctx,
-			final String content) {
-		final Matcher m = BALANCE_MATCH_PATTERN.matcher(content);
-		String term = null;
-		if (m.find()) {
-			term = m.group(1) + "l";
-		} else {
-			Log.w(TAG, content);
-			term = "?";
-		}
-		this.getSpec(ctx.getContext()).setBalance(term);
-	}
+	// private void notifyFreeCount(final ConnectorContext ctx,
+	// final String content) {
+	// final Matcher m = BALANCE_MATCH_PATTERN.matcher(content);
+	// String term = null;
+	// if (m.find()) {
+	// term = m.group(1) + "l";
+	// } else {
+	// Log.w(TAG, content);
+	// term = "?";
+	// }
+	// this.getSpec(ctx.getContext()).setBalance(term);
+	// }
 
 	/**
 	 * {@inheritDoc}
@@ -375,7 +383,8 @@ public class ConnectorSmsge extends Connector {
 			throws WebSMSException {
 		final ConnectorContext ctx = ConnectorContext.create(context, intent);
 		if (this.login(ctx)) {
-			this.sendSms(ctx);
+
+			// this.sendSms(ctx);
 		}
 
 	}
