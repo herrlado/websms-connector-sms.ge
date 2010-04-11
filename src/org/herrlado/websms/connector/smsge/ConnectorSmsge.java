@@ -24,7 +24,6 @@ import java.text.SimpleDateFormat;
 import java.util.regex.Pattern;
 
 import org.apache.http.HttpResponse;
-import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.client.utils.URLEncodedUtils;
 import org.apache.http.entity.StringEntity;
@@ -189,14 +188,20 @@ public class ConnectorSmsge extends Connector {
 		// <option value="lailai3">ლაილაი 8-58</option>
 		// <option value="lailai4">ლაილაი 8-57</option>
 
-		sb1.append("phone=");
+		sb1.append("&phone=");
 		// 
 		sb1.append(URLEncoder.encode(sb.toString(), PAGE_ENCODING));
 
-		sb1.append("message=");
+		sb1.append("&message=");
 		sb1
 				.append(URLEncoder.encode(ctx.getCommand().getText(),
 						PAGE_ENCODING));
+		sb1.append("&user_id=408214");
+		sb1.append("&user_phone=99593337082");
+		sb1.append("&num=");
+		sb1.append("&x=");
+		sb1.append("&y=");
+		sb1.append("&Send=1");
 
 		final String post = sb1.toString();
 		Log.d(TAG, "request: " + post);
@@ -219,9 +224,10 @@ public class ConnectorSmsge extends Connector {
 			final HttpPost request = createPOST(LOGIN_URL, getLoginPost(p
 					.getString(Preferences.USERNAME, ""), p.getString(
 					Preferences.PASSWORD, "")));
-			HttpResponse response = ctx.getClient().execute(request);
-			response = ctx.getClient().execute(
-					new HttpGet("http://www.sms.ge/ngeo/main.php"));
+			request.addHeader("Referer", "http://www.sms.ge/ngeo/index.php");
+			final HttpResponse response = ctx.getClient().execute(request);
+			// response = ctx.getClient().execute(
+			// new HttpGet("http://www.sms.ge/ngeo/main.php"));
 			final String cutContent = Utils.stream2str(response.getEntity()
 					.getContent());
 
