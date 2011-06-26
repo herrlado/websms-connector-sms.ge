@@ -18,16 +18,24 @@
  */
 package org.herrlado.websms.connector.smsge;
 
+import java.io.IOException;
+import java.io.OutputStream;
 import java.io.UnsupportedEncodingException;
+import java.net.HttpURLConnection;
 import java.net.URLEncoder;
-import java.text.SimpleDateFormat;
-import java.util.regex.Pattern;
+import java.util.ArrayList;
 
+import org.apache.http.Header;
+import org.apache.http.HttpEntity;
 import org.apache.http.HttpResponse;
+import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.client.utils.URLEncodedUtils;
 import org.apache.http.entity.StringEntity;
 import org.apache.http.message.BasicHeader;
+import org.apache.http.message.BasicNameValuePair;
+import org.apache.http.params.BasicHttpParams;
+import org.apache.http.params.HttpParams;
 import org.apache.http.protocol.HTTP;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -35,13 +43,16 @@ import org.json.JSONObject;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.graphics.drawable.BitmapDrawable;
 import android.preference.PreferenceManager;
 import android.util.Log;
+import android.util.Pair;
 import de.ub0r.android.websms.connector.common.Connector;
 import de.ub0r.android.websms.connector.common.ConnectorSpec;
 import de.ub0r.android.websms.connector.common.Utils;
 import de.ub0r.android.websms.connector.common.WebSMSException;
 import de.ub0r.android.websms.connector.common.ConnectorSpec.SubConnectorSpec;
+
 
 /**
  * Receives commands coming as broadcast from WebSMS.
@@ -69,18 +80,33 @@ public class ConnectorSmsge extends Connector {
 	/** This String will be matched if the user is logged in. */
 	private static final String MATCH_LOGIN_SUCCESS = "logout.php";
 
-	/**
-	 * Pattern to extract free sms count from sms page. Looks like.
-	 */
-	private static final Pattern BALANCE_MATCH_PATTERN = Pattern.compile(
-			"<span id=\"balance\">(.+?)</span>", Pattern.DOTALL);
+	private static final String URL_CAPTCHA = "http://www.sms.ge/ngeo/inc/include/securimage/securimage_show.php";
+	/** Object to sync with. */
+	private static final Object CAPTCHA_SYNC = new Object();
+	
+	/** Timeout for entering the captcha. */
+	private static final long CAPTCHA_TIMEOUT = 60000;
 
-	private static final String PAGE_ENCODING = "UTF-8";
-	// 16.03.2010 07:10:00
-	private static final SimpleDateFormat format = new SimpleDateFormat(
-			"dd.MM.yyyy HH:mm:ss");
-
-	/**
+	/** Solved Captcha. */
+	private static String captchaSolve = null;
+	
+	private static final String CHECK_WRONGCAPTCHA = "უსაფრთხოების კოდი არასწორია";
+	private static final String CHECK_WRONG_NUMBER = "ტელეფონის ნომერი რომელიც თქვენ შეიყვანეთ არასწორია";
+	private static final String CHECK_SUCCESS = "თქვენი შეტყობინება წარმატებით გაიგზავნა";
+	private static final String CHECK_NO_GEOCELL = "მითითებული ნომერი არ ეკუთვნის ჯეოსელს";
+    private static final String PARAM_uid ="bG%8C%0B%F6%A4%2AO";
+    private static final String PARAM_sys = "5%90%EC%EF%C3q%F4%ED%7B%B9%ADc%15%92%AE%93";
+    private static final String PARAM_x = "31";
+    private static final String PARAM_y = "17";
+    private static final String PARAM_Send = "1";
+    //private static final String PARAM_captcha_code="";
+    //private static final String PARAM_message="";
+    //private static final String PARAM_num="";
+    //private static final String PRAM_phone="";
+    //private static final String PARAM_geolai="";
+    
+    
+		/**
 	 * {@inheritDoc}
 	 */
 	@Override
@@ -90,15 +116,13 @@ public class ConnectorSmsge extends Connector {
 		c.setAuthor(// .
 				context.getString(R.string.smsge_author));
 		c.setBalance(null);
-		c.setPrefsTitle(context.getString(R.string.preferences));
+		//c.setPrefsTitle(context.getString(R.string.preferences));
 
 		c.setCapabilities(ConnectorSpec.CAPABILITIES_UPDATE
 				| ConnectorSpec.CAPABILITIES_SEND
 				| ConnectorSpec.CAPABILITIES_PREFS);
 		c.addSubConnector(TAG, c.getName(),
 				SubConnectorSpec.FEATURE_CUSTOMSENDER);
-		// | SubConnectorSpec.FEATURE_SENDLATER);//TODO fix me
-		// | SubConnectorSpec.FEATURE_SENDLATER_QUARTERS);
 		return c;
 	}
 
@@ -142,70 +166,79 @@ public class ConnectorSmsge extends Connector {
 		sb.append(URLEncoder.encode(password, ENCODING));
 		sb.append("&" + URLEncoder.encode("submit.x") + "=42");
 		sb.append("&" + URLEncoder.encode("submit.y") + "=5");
-		Log.d(TAG, sb.toString());
+		//Log.d(TAG, sb.toString());
 		return sb.toString();
 	}
 
+	private Pair<String, String> normalizeNumber(String number){
+		if(number.startsWith("00995")){
+			number = number.substring(5);
+		} else if(number.startsWith("+995")){
+			number = number.substring(4);
+		}
+		
+		if(number.startsWith("5") == false){
+			throw new WebSMSException("Not a valid recipient!");
+		}
+		
+		return Pair.create("995"+number.substring(0,3), number.substring(3));
+	}
+	
 	/**
 	 * These post data is needed for sending a sms.
 	 * 
 	 * @param ctx
-	 *            {@link ConnectorContext}
+	 *            {@link ConnectorContext}s
 	 * @return array of params
 	 * @throws Exception
 	 *             if an error occures.
 	 */
-	private String getSmsPost(final ConnectorContext ctx) throws Exception {
-		final SharedPreferences p = ctx.getPreferences();
-		final StringBuilder sb = new StringBuilder();
+	private String getSmsPost(final ConnectorContext ctx, String captcha) throws Exception {
+
 		final String[] to = ctx.getCommand().getRecipients();
-		String delimiter = ",";
-		for (int i = 0; i < to.length; ++i) {
-			if (i == to.length - 1) {
-				delimiter = "";
-			}
-			sb.append(Utils.getRecipientsNumber(to[i])).append(delimiter);
-
+		if(to.length != 1){
+			throw new WebSMSException("Only one Recipient allowed");
 		}
-		// data: {
-		// rcpt: this.target,
-		// sender: sender,
-		// sendernum: $pick(sendernum, ''),
-		// message: text,
-		// schedule: (this.options.schedule || ''),
-		// parentid: (parentid || ''),
-		// parenttype: (parenttype || ''),
-		// eventtype: (eventtype || ''),
-		// send: true
-		// },
 
-		final StringBuilder sb1 = new StringBuilder();
+		
+		String msg = ctx.getCommand().getText();
+		if(msg.length() > 150){
+			throw new WebSMSException("Message text too long. Max. 150 chars allowed!");
+		}
+		
+		Pair<String,String> number = normalizeNumber(Utils.getRecipientsNumber(to[0]));
+			
+		StringBuilder sb1 = new StringBuilder();
+		sb1.append("geolai").append("=").append(number.first);
+		sb1.append("&");
+		sb1.append("phone").append("=").append(number.second);
+		sb1.append("&");
+		sb1.append("message").append("=").append(e(msg));
+		sb1.append("&");
+		sb1.append("num").append("=").append(msg.length());
+		sb1.append("&");
+		sb1.append("uid").append("=").append(e(PARAM_uid));
+		sb1.append("&");
+		sb1.append("sys").append("=").append(e(PARAM_sys));
+		sb1.append("&");
+		sb1.append("Send").append("=").append(e(PARAM_Send));
+		sb1.append("&");
+		sb1.append("x").append("=").append(PARAM_x);
+		sb1.append("&");
+		sb1.append("y").append("=").append(PARAM_y);
+		sb1.append("&");
+		sb1.append("captcha_code").append("=").append(captcha);
 
-		sb1.append("geolai=");//
-		// <option selected="" value="geocell">ჯეოსელი 8-77</option>
-		// <option value="lailai">ლაილაი 8-93</option>
-		// <option value="lailai2">ლაილაი 8-55</option>
-		// <option value="lailai3">ლაილაი 8-58</option>
-		// <option value="lailai4">ლაილაი 8-57</option>
-
-		sb1.append("&phone=");
-		// 
-		sb1.append(URLEncoder.encode(sb.toString(), PAGE_ENCODING));
-
-		sb1.append("&message=");
-		sb1
-				.append(URLEncoder.encode(ctx.getCommand().getText(),
-						PAGE_ENCODING));
-		sb1.append("&user_id=408214");
-		sb1.append("&user_phone=99593337082");
-		sb1.append("&num=");
-		sb1.append("&x=");
-		sb1.append("&y=");
-		sb1.append("&Send=1");
 
 		final String post = sb1.toString();
 		Log.d(TAG, "request: " + post);
+		
+		
 		return post;
+	}
+	
+	private String e(String toenc) throws UnsupportedEncodingException{
+		return URLEncoder.encode(toenc,ENCODING);
 	}
 
 	/**
@@ -221,10 +254,12 @@ public class ConnectorSmsge extends Connector {
 		try {
 
 			final SharedPreferences p = ctx.getPreferences();
-			final HttpPost request = createPOST(LOGIN_URL, getLoginPost(p
-					.getString(Preferences.USERNAME, ""), p.getString(
-					Preferences.PASSWORD, "")));
+			final HttpPost request = createPOST(LOGIN_URL);
 			request.addHeader("Referer", "http://www.sms.ge/ngeo/index.php");
+			 String post = getLoginPost(p
+						.getString(Preferences.USERNAME, ""), p.getString(
+						Preferences.PASSWORD, ""));
+			request.setEntity(new StringEntity(post));
 			final HttpResponse response = ctx.getClient().execute(request);
 			// response = ctx.getClient().execute(
 			// new HttpGet("http://www.sms.ge/ngeo/main.php"));
@@ -255,13 +290,11 @@ public class ConnectorSmsge extends Connector {
 	 * @throws Exception
 	 *             if an error occures
 	 */
-	private static HttpPost createPOST(final String url,
-			final String urlencodedparams) throws Exception {
+	private static HttpPost createPOST(final String url) throws Exception {
 		final HttpPost post = new HttpPost(url);
 		post.setHeader("User-Agent", FAKE_USER_AGENT);
 		post.setHeader(new BasicHeader(HTTP.CONTENT_TYPE,
 				URLEncodedUtils.CONTENT_TYPE));
-		post.setEntity(new StringEntity(urlencodedparams));
 		return post;
 	}
 
@@ -285,38 +318,20 @@ public class ConnectorSmsge extends Connector {
 	 * @throws WebSMSException
 	 *             on an error
 	 */
-	private boolean sendSms(final ConnectorContext ctx) throws WebSMSException {
+	private boolean sendSms(final ConnectorContext ctx, String captcha) throws WebSMSException {
 		try {
-			final HttpResponse response = ctx.getClient().execute(
-					createPOST(SMS_URL, this.getSmsPost(ctx)));
+			HttpPost post = createPOST(SMS_URL);
+			String p = getSmsPost(ctx, captcha);
+			post.setEntity(new StringEntity(p));
+			final HttpResponse response = ctx.getClient().execute(post);
 			final boolean sent = this.afterSmsSent(ctx, response);
-			// if (sent) {
-			// notifyBalance(ctx, ctx.getClient());
-			// }
 			return sent;
+		} catch (WebSMSException ex){
+			throw ex;
 		} catch (final Exception ex) {
 			throw new WebSMSException(ex.getMessage());
 		}
 	}
-
-	// private void notifyBalance(final ConnectorContext ctx,
-	// final DefaultHttpClient client) {
-	// try {
-	// final HttpResponse respone = client
-	// .execute(new HttpGet(BALANCE_URL));
-	// if (respone.getStatusLine().getStatusCode() != 200) {
-	// Log.w(TAG, "notifyBalance: " + respone.getStatusLine());
-	// return;
-	// }
-	// final JSONObject jo = new JSONObject(Utils.stream2str(respone
-	// .getEntity().getContent()));
-	// final String balance = jo.getString("balance");
-	// this.getSpec(ctx.getContext()).setBalance(balance);
-	//
-	// } catch (final Exception ex) {
-	// Log.w(TAG, "notifyBalance: " + ex.getMessage());
-	// }
-	// }
 
 	/**
 	 * Handles content after sms sending.
@@ -337,61 +352,102 @@ public class ConnectorSmsge extends Connector {
 		Log.d(TAG, "response: " + body);
 
 		if (body == null || body.length() == 0) {
-			throw new WebSMSException("response.empty");// TODO
+			throw new WebSMSException("No Response!");// TODO
 		}
 
-		JSONObject jo = null;
-		try {
-			jo = new JSONObject(body);
-		} catch (final JSONException e) {
-			throw new WebSMSException("respone.nojson");
+		if(body.indexOf(CHECK_SUCCESS) != -1){
+			return true;
+		}
+		
+		if(body.indexOf(CHECK_WRONGCAPTCHA) != -1){
+			throw new WebSMSException(CHECK_WRONGCAPTCHA);
+		}
+		
+		if(body.indexOf(CHECK_WRONG_NUMBER) != -1){
+			throw new WebSMSException(CHECK_WRONG_NUMBER);
+		}
+		
+		if(body.indexOf(CHECK_NO_GEOCELL) != -1 ) {
+			throw new WebSMSException(CHECK_NO_GEOCELL);
 		}
 
-		if (jo.has("result")) {
-			jo = jo.getJSONObject("result");
-		}
-		final int faultCode = jo.getInt("faultCode");
-
-		final String faultString = jo.getString("faultString");
-
-		if (faultCode != 200) {
-			throw new WebSMSException(faultString);
-		}
-		return true;
+		throw new WebSMSException("SMS არ გაიგზავნა :( თუ ხშირად მეორდება მიმართე პროგრამისტს.");
 	}
 
-	/**
-	 * Push SMS Free Count to WebSMS.
-	 * 
-	 * @param ctx
-	 *            {@link ConnectorContext}
-	 * @param content
-	 *            conten to investigate.
-	 */
-	// private void notifyFreeCount(final ConnectorContext ctx,
-	// final String content) {
-	// final Matcher m = BALANCE_MATCH_PATTERN.matcher(content);
-	// String term = null;
-	// if (m.find()) {
-	// term = m.group(1) + "l";
-	// } else {
-	// Log.w(TAG, content);
-	// term = "?";
-	// }
-	// this.getSpec(ctx.getContext()).setBalance(term);
-	// }
 
 	/**
 	 * {@inheritDoc}
+	 * @throws IOException 
 	 */
 	@Override
 	protected final void doSend(final Context context, final Intent intent)
-			throws WebSMSException {
+			throws WebSMSException, IOException {
 		final ConnectorContext ctx = ConnectorContext.create(context, intent);
 		if (this.login(ctx)) {
-
-			// this.sendSms(ctx);
+			String captcha = solveCaptcha(ctx);
+			if(captcha != null){
+				sendSms(ctx,captcha);
+			}
 		}
 
 	}
+	
+	/**
+	 * Load captcha and wait for user input to solve it.
+	 * 
+	 * @param context
+	 *            {@link Context}
+	 * @param flow
+	 *            _flowExecutionKey
+	 * @return true if captcha was solved
+	 * @throws IOException
+	 *             IOException
+	 */
+	private String solveCaptcha(final ConnectorContext ctx)
+			throws IOException {
+		
+		HttpGet cap = new HttpGet(URL_CAPTCHA);
+		cap.addHeader("Referer", "http://www.sms.ge/ngeo/index.php");
+		cap.setHeader("User-Agent", FAKE_USER_AGENT);
+		HttpResponse response = ctx.getClient().execute(cap);
+		int resp = response.getStatusLine().getStatusCode();
+		if (resp != HttpURLConnection.HTTP_OK) {
+			throw new WebSMSException(ctx.getContext(), R.string.error_http, "" + resp);
+		}
+		BitmapDrawable captcha = new BitmapDrawable(response.getEntity()
+				.getContent());
+		final Intent intent = new Intent(Connector.ACTION_CAPTCHA_REQUEST);
+		intent.putExtra(Connector.EXTRA_CAPTCHA_DRAWABLE, captcha.getBitmap());
+		captcha = null;
+		Context context = ctx.getContext();
+		this.getSpec(context).setToIntent(intent);
+		context.sendBroadcast(intent);
+		try {
+			synchronized (CAPTCHA_SYNC) {
+				CAPTCHA_SYNC.wait(CAPTCHA_TIMEOUT);
+			}
+		} catch (InterruptedException e) {
+			Log.e(TAG, null, e);
+			return null;
+		}
+		if (captchaSolve == null) {
+			return captchaSolve;
+		}
+		// got user response, try to solve captcha
+		Log.d(TAG, "got solved captcha: " + captchaSolve);
+		
+		return captchaSolve;
+	}
+	
+	/**
+	 * {@inheritDoc}
+	 */
+	protected final void gotSolvedCaptcha(final Context context,
+			final String solvedCaptcha) {
+		captchaSolve = solvedCaptcha;
+		synchronized (CAPTCHA_SYNC) {
+			CAPTCHA_SYNC.notify();
+		}
+	}
+
 }

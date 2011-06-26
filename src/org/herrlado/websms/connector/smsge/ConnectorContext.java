@@ -73,7 +73,6 @@ public class ConnectorContext {
 		this.intent = intent;
 		this.command = new ConnectorCommand(this.intent);
 		this.client = new DefaultHttpClient();
-
 	}
 
 	/**

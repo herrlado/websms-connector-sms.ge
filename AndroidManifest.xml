@@ -19,7 +19,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
 	android:versionCode="10" android:versionName="1.0" package="org.herrlado.websms.connector.smsge">
 	<application android:label="@string/app_name" android:icon="@drawable/icon"
-		android:debuggable="true">
+		android:debuggable="false">
  
 		<!--
 			This Activity is brought by the WebSMS Connector Plugin API. It shows
@@ -50,6 +50,7 @@
 			<intent-filter>
 				<action android:name="org.herrlado.websms.connector.smsge.RUN_UPDATE" />
 				<action android:name="org.herrlado.websms.connector.smsge.RUN_SEND" />
+				<action android:name="org.herrlado.websms.connector.smsge.CAPTCHA_SOLVED" />
 				<action android:name="de.ub0r.android.websms.connector.UPDATE" />
 			</intent-filter>
 		</receiver>
