@@ -1,7 +1,7 @@
 /*
- * Copyright (C) 2010 Felix Bechstein
+ * Copyright (C) 2010 Lado Kumsiashvili
  * 
- * This file is part of WebSMS.
+ * This file is part of websms-connector-sms.ge
  * 
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License as published by the Free Software
@@ -19,26 +19,17 @@
 package org.herrlado.websms.connector.smsge;
 
 import java.io.IOException;
-import java.io.OutputStream;
 import java.io.UnsupportedEncodingException;
 import java.net.HttpURLConnection;
 import java.net.URLEncoder;
-import java.util.ArrayList;
 
-import org.apache.http.Header;
-import org.apache.http.HttpEntity;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.client.utils.URLEncodedUtils;
 import org.apache.http.entity.StringEntity;
 import org.apache.http.message.BasicHeader;
-import org.apache.http.message.BasicNameValuePair;
-import org.apache.http.params.BasicHttpParams;
-import org.apache.http.params.HttpParams;
 import org.apache.http.protocol.HTTP;
-import org.json.JSONException;
-import org.json.JSONObject;
 
 import android.content.Context;
 import android.content.Intent;
@@ -49,10 +40,9 @@ import android.util.Log;
 import android.util.Pair;
 import de.ub0r.android.websms.connector.common.Connector;
 import de.ub0r.android.websms.connector.common.ConnectorSpec;
+import de.ub0r.android.websms.connector.common.ConnectorSpec.SubConnectorSpec;
 import de.ub0r.android.websms.connector.common.Utils;
 import de.ub0r.android.websms.connector.common.WebSMSException;
-import de.ub0r.android.websms.connector.common.ConnectorSpec.SubConnectorSpec;
-
 
 /**
  * Receives commands coming as broadcast from WebSMS.
@@ -83,30 +73,30 @@ public class ConnectorSmsge extends Connector {
 	private static final String URL_CAPTCHA = "http://www.sms.ge/ngeo/inc/include/securimage/securimage_show.php";
 	/** Object to sync with. */
 	private static final Object CAPTCHA_SYNC = new Object();
-	
+
 	/** Timeout for entering the captcha. */
 	private static final long CAPTCHA_TIMEOUT = 60000;
 
 	/** Solved Captcha. */
 	private static String captchaSolve = null;
-	
+
 	private static final String CHECK_WRONGCAPTCHA = "უსაფრთხოების კოდი არასწორია";
 	private static final String CHECK_WRONG_NUMBER = "ტელეფონის ნომერი რომელიც თქვენ შეიყვანეთ არასწორია";
 	private static final String CHECK_SUCCESS = "თქვენი შეტყობინება წარმატებით გაიგზავნა";
 	private static final String CHECK_NO_GEOCELL = "მითითებული ნომერი არ ეკუთვნის ჯეოსელს";
-    private static final String PARAM_uid ="bG%8C%0B%F6%A4%2AO";
-    private static final String PARAM_sys = "5%90%EC%EF%C3q%F4%ED%7B%B9%ADc%15%92%AE%93";
-    private static final String PARAM_x = "31";
-    private static final String PARAM_y = "17";
-    private static final String PARAM_Send = "1";
-    //private static final String PARAM_captcha_code="";
-    //private static final String PARAM_message="";
-    //private static final String PARAM_num="";
-    //private static final String PRAM_phone="";
-    //private static final String PARAM_geolai="";
-    
-    
-		/**
+	//private static final String PARAM_uid = "";
+	//private static final String PARAM_sys = "";
+	private static final String PARAM_x = "31";
+	private static final String PARAM_y = "17";
+	private static final String PARAM_Send = "1";
+
+	// private static final String PARAM_captcha_code="";
+	// private static final String PARAM_message="";
+	// private static final String PARAM_num="";
+	// private static final String PRAM_phone="";
+	// private static final String PARAM_geolai="";
+
+	/**
 	 * {@inheritDoc}
 	 */
 	@Override
@@ -114,9 +104,9 @@ public class ConnectorSmsge extends Connector {
 		final String name = context.getString(R.string.smsge_name);
 		final ConnectorSpec c = new ConnectorSpec(name);
 		c.setAuthor(// .
-				context.getString(R.string.smsge_author));
+		context.getString(R.string.smsge_author));
 		c.setBalance(null);
-		//c.setPrefsTitle(context.getString(R.string.preferences));
+		// c.setPrefsTitle(context.getString(R.string.preferences));
 
 		c.setCapabilities(ConnectorSpec.CAPABILITIES_UPDATE
 				| ConnectorSpec.CAPABILITIES_SEND
@@ -146,6 +136,20 @@ public class ConnectorSmsge extends Connector {
 		return connectorSpec;
 	}
 
+	private static Pair<String, String> getUidSys(String content) {
+		int uididx = content.indexOf("uid");
+		uididx = content.indexOf("value=\"", uididx);
+		uididx += 7;
+		int uididx2 = content.indexOf("\"", uididx);
+		String uid = content.substring(uididx, uididx2);
+		int sysidx = content.indexOf("sys", uididx + uid.length() + 1);
+		sysidx = content.indexOf("value=\"", sysidx);
+		sysidx += 7;
+		int sysidx2 = content.indexOf("\"", sysidx);
+		String sys = content.substring(sysidx, sysidx2);
+		return Pair.create(uid, sys);
+	}
+
 	/**
 	 * b This post data is needed for log in.
 	 * 
@@ -166,24 +170,24 @@ public class ConnectorSmsge extends Connector {
 		sb.append(URLEncoder.encode(password, ENCODING));
 		sb.append("&" + URLEncoder.encode("submit.x") + "=42");
 		sb.append("&" + URLEncoder.encode("submit.y") + "=5");
-		//Log.d(TAG, sb.toString());
+		// Log.d(TAG, sb.toString());
 		return sb.toString();
 	}
 
-	private Pair<String, String> normalizeNumber(String number){
-		if(number.startsWith("00995")){
+	private Pair<String, String> normalizeNumber(String number) {
+		if (number.startsWith("00995")) {
 			number = number.substring(5);
-		} else if(number.startsWith("+995")){
+		} else if (number.startsWith("+995")) {
 			number = number.substring(4);
 		}
-		
-		if(number.startsWith("5") == false){
+
+		if (number.startsWith("5") == false) {
 			throw new WebSMSException("Not a valid recipient!");
 		}
-		
-		return Pair.create("995"+number.substring(0,3), number.substring(3));
+
+		return Pair.create("995" + number.substring(0, 3), number.substring(3));
 	}
-	
+
 	/**
 	 * These post data is needed for sending a sms.
 	 * 
@@ -193,21 +197,23 @@ public class ConnectorSmsge extends Connector {
 	 * @throws Exception
 	 *             if an error occures.
 	 */
-	private String getSmsPost(final ConnectorContext ctx, String captcha) throws Exception {
+	private String getSmsPost(final ConnectorContext ctx,
+			Pair<String, String> uidsys, String captcha) throws Exception {
 
 		final String[] to = ctx.getCommand().getRecipients();
-		if(to.length != 1){
+		if (to.length != 1) {
 			throw new WebSMSException("Only one Recipient allowed");
 		}
 
-		
 		String msg = ctx.getCommand().getText();
-		if(msg.length() > 150){
-			throw new WebSMSException("Message text too long. Max. 150 chars allowed!");
+		if (msg.length() > 150) {
+			throw new WebSMSException(
+					"Message text too long. Max. 150 chars allowed!");
 		}
-		
-		Pair<String,String> number = normalizeNumber(Utils.getRecipientsNumber(to[0]));
-			
+
+		Pair<String, String> number = normalizeNumber(Utils
+				.getRecipientsNumber(to[0]));
+
 		StringBuilder sb1 = new StringBuilder();
 		sb1.append("geolai").append("=").append(number.first);
 		sb1.append("&");
@@ -217,9 +223,9 @@ public class ConnectorSmsge extends Connector {
 		sb1.append("&");
 		sb1.append("num").append("=").append(msg.length());
 		sb1.append("&");
-		sb1.append("uid").append("=").append(e(PARAM_uid));
+		sb1.append("uid").append("=").append(e(uidsys.first));
 		sb1.append("&");
-		sb1.append("sys").append("=").append(e(PARAM_sys));
+		sb1.append("sys").append("=").append(e(uidsys.second));
 		sb1.append("&");
 		sb1.append("Send").append("=").append(e(PARAM_Send));
 		sb1.append("&");
@@ -229,16 +235,14 @@ public class ConnectorSmsge extends Connector {
 		sb1.append("&");
 		sb1.append("captcha_code").append("=").append(captcha);
 
-
 		final String post = sb1.toString();
 		Log.d(TAG, "request: " + post);
-		
-		
+
 		return post;
 	}
-	
-	private String e(String toenc) throws UnsupportedEncodingException{
-		return URLEncoder.encode(toenc,ENCODING);
+
+	private String e(String toenc) throws UnsupportedEncodingException {
+		return URLEncoder.encode(toenc, ENCODING);
 	}
 
 	/**
@@ -250,15 +254,15 @@ public class ConnectorSmsge extends Connector {
 	 * @throws WebSMSException
 	 *             if any Exception occures.
 	 */
-	private boolean login(final ConnectorContext ctx) throws WebSMSException {
+	private Pair<String, String> login(final ConnectorContext ctx)
+			throws WebSMSException {
 		try {
 
 			final SharedPreferences p = ctx.getPreferences();
 			final HttpPost request = createPOST(LOGIN_URL);
 			request.addHeader("Referer", "http://www.sms.ge/ngeo/index.php");
-			 String post = getLoginPost(p
-						.getString(Preferences.USERNAME, ""), p.getString(
-						Preferences.PASSWORD, ""));
+			String post = getLoginPost(p.getString(Preferences.USERNAME, ""),
+					p.getString(Preferences.PASSWORD, ""));
 			request.setEntity(new StringEntity(post));
 			final HttpResponse response = ctx.getClient().execute(request);
 			// response = ctx.getClient().execute(
@@ -271,12 +275,11 @@ public class ConnectorSmsge extends Connector {
 				throw new WebSMSException(ctx.getContext(), R.string.error_pw);
 			}
 
-			// notifyFreeCount(ctx, cutContent);
+			return getUidSys(cutContent);
 
 		} catch (final Exception e) {
 			throw new WebSMSException(e.getMessage());
 		}
-		return true;
 	}
 
 	/**
@@ -318,15 +321,16 @@ public class ConnectorSmsge extends Connector {
 	 * @throws WebSMSException
 	 *             on an error
 	 */
-	private boolean sendSms(final ConnectorContext ctx, String captcha) throws WebSMSException {
+	private boolean sendSms(final ConnectorContext ctx,
+			Pair<String, String> uidsys, String captcha) throws WebSMSException {
 		try {
 			HttpPost post = createPOST(SMS_URL);
-			String p = getSmsPost(ctx, captcha);
+			String p = getSmsPost(ctx, uidsys, captcha);
 			post.setEntity(new StringEntity(p));
 			final HttpResponse response = ctx.getClient().execute(post);
 			final boolean sent = this.afterSmsSent(ctx, response);
 			return sent;
-		} catch (WebSMSException ex){
+		} catch (WebSMSException ex) {
 			throw ex;
 		} catch (final Exception ex) {
 			throw new WebSMSException(ex.getMessage());
@@ -355,43 +359,43 @@ public class ConnectorSmsge extends Connector {
 			throw new WebSMSException("No Response!");// TODO
 		}
 
-		if(body.indexOf(CHECK_SUCCESS) != -1){
+		if (body.indexOf(CHECK_SUCCESS) != -1) {
 			return true;
 		}
-		
-		if(body.indexOf(CHECK_WRONGCAPTCHA) != -1){
+
+		if (body.indexOf(CHECK_WRONGCAPTCHA) != -1) {
 			throw new WebSMSException(CHECK_WRONGCAPTCHA);
 		}
-		
-		if(body.indexOf(CHECK_WRONG_NUMBER) != -1){
+
+		if (body.indexOf(CHECK_WRONG_NUMBER) != -1) {
 			throw new WebSMSException(CHECK_WRONG_NUMBER);
 		}
-		
-		if(body.indexOf(CHECK_NO_GEOCELL) != -1 ) {
+
+		if (body.indexOf(CHECK_NO_GEOCELL) != -1) {
 			throw new WebSMSException(CHECK_NO_GEOCELL);
 		}
 
-		throw new WebSMSException("SMS არ გაიგზავნა :( თუ ხშირად მეორდება მიმართე პროგრამისტს.");
+		throw new WebSMSException(
+				"SMS არ გაიგზავნა :( თუ ხშირად მეორდება მიმართე პროგრამისტს.");
 	}
-
 
 	/**
 	 * {@inheritDoc}
-	 * @throws IOException 
+	 * 
+	 * @throws IOException
 	 */
 	@Override
 	protected final void doSend(final Context context, final Intent intent)
 			throws WebSMSException, IOException {
 		final ConnectorContext ctx = ConnectorContext.create(context, intent);
-		if (this.login(ctx)) {
-			String captcha = solveCaptcha(ctx);
-			if(captcha != null){
-				sendSms(ctx,captcha);
-			}
+		Pair<String, String> uidsys = login(ctx);
+		String captcha = solveCaptcha(ctx);
+		if (captcha == null) {
+			throw new WebSMSException("Captcha not solved");
 		}
-
+		sendSms(ctx, uidsys, captcha);
 	}
-	
+
 	/**
 	 * Load captcha and wait for user input to solve it.
 	 * 
@@ -403,16 +407,16 @@ public class ConnectorSmsge extends Connector {
 	 * @throws IOException
 	 *             IOException
 	 */
-	private String solveCaptcha(final ConnectorContext ctx)
-			throws IOException {
-		
+	private String solveCaptcha(final ConnectorContext ctx) throws IOException {
+
 		HttpGet cap = new HttpGet(URL_CAPTCHA);
 		cap.addHeader("Referer", "http://www.sms.ge/ngeo/index.php");
 		cap.setHeader("User-Agent", FAKE_USER_AGENT);
 		HttpResponse response = ctx.getClient().execute(cap);
 		int resp = response.getStatusLine().getStatusCode();
 		if (resp != HttpURLConnection.HTTP_OK) {
-			throw new WebSMSException(ctx.getContext(), R.string.error_http, "" + resp);
+			throw new WebSMSException(ctx.getContext(), R.string.error_http, ""
+					+ resp);
 		}
 		BitmapDrawable captcha = new BitmapDrawable(response.getEntity()
 				.getContent());
@@ -435,9 +439,10 @@ public class ConnectorSmsge extends Connector {
 		}
 		// got user response, try to solve captcha
 		Log.d(TAG, "got solved captcha: " + captchaSolve);
-		
+
 		return captchaSolve;
 	}
+
 	
 	/**
 	 * {@inheritDoc}
